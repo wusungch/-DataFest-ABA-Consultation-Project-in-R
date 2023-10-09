@@ -1,0 +1,222 @@
+---
+title: "2023 DataFest ABA Consultation Code"
+output: pdf_document
+---
+
+```{r, message=FALSE, warning=FALSE, height = 100}
+library(tidyverse)
+library(knitr)
+library(dplyr)
+library(rpart)
+library(partykit)
+library(pscl)
+library(datasets)
+library(MASS)
+library(klaR)
+library(ggplot2)
+library(stats)
+library(data.table)
+library(rempsyc)
+library(zoo)
+library(DMwR)
+library(performanceEstimation)
+install.packages("randomForest")
+library(UBL)
+library(tree)
+library(ROSE)
+
+#Read all data
+attorneys <- read.csv("attorneys.csv")
+time <- read.csv("attorneytimeentries.csv")
+category <- read.csv("categories.csv")
+clients <- read.csv("clients.csv")
+posts <- read.csv("questionposts.csv")
+questions <- read.csv("questions.csv")
+statesites <- read.csv("statesites.csv")
+subcategories <- read.csv("subcategories.csv")
+
+#create a new column eligibility based on annual income and allowed income
+clients$AnnualIncome <- as.numeric(clients$AnnualIncome)
+clients$AllowedIncome <- as.numeric(clients$AllowedIncome)
+client_new <- clients %>% mutate(eligibility = case_when(AnnualIncome <= AllowedIncome ~ "Eligible",
+                                                         AnnualIncome > AllowedIncome ~ "Ineligible"))
+
+#All eligible clients
+eiligible_clients <- client_new %>% filter(eligibility == "Eligible")
+eiligible_clients$Age <- as.numeric(eiligible_clients$Age)
+eiligible_clients$NumberInHousehold <- as.numeric(eiligible_clients$NumberInHousehold)
+eiligible_clients$Gender <- as.factor(eiligible_clients$Gender)
+eiligible_clients$EthnicIdentity <- as.factor(eiligible_clients$EthnicIdentity)
+eiligible_clients$Veteran <- as.factor(eiligible_clients$Veteran)
+eiligible_clients$MaritalStatus <- as.factor(eiligible_clients$MaritalStatus)
+
+#All questions asked by eligible clients
+eligible_questions <- merge(eiligible_clients, questions, by.x = "ClientUno", 
+                     by.y = "AskedByClientUno")
+
+#Category table
+total_questions <- nrow(eligible_questions)
+prop <- eligible_questions %>% group_by(Category) %>% summarise(Proption = paste0(round(100 * n()/total_questions, 2), "%"))
+kable(prop, caption = "Proportions of eligible questions for each category")
+```
+
+```{r, message=FALSE, warning=FALSE}
+
+#national
+combined_national <- merge(eiligible_clients, questions, by.x = "ClientUno", 
+                     by.y = "AskedByClientUno") %>% filter(Gender == "Female" | 
+                                                             Gender == "Male") %>% filter(MaritalStatus != "I'd rather not answer") %>% filter(MaritalStatus != "NULL") %>% filter(Category != "Other") %>% filter(NumberInHousehold <= 10) %>% filter(Veteran != "NULL")
+combined_national <- subset(combined_national, select = c(Category,Age, Gender, 
+                                                          Veteran, Imprisoned, 
+                                                          NumberInHousehold, AnnualIncome))
+combined_national$Category <- as.factor(combined_national$Category)
+combined_national$Age <- as.numeric(combined_national$Age)
+combined_national$NumberInHousehold <- as.numeric(combined_national$NumberInHousehold)
+combined_national$AnnualIncome <- as.numeric(combined_national$AnnualIncome)
+combined_national$Gender <- as.factor(combined_national$Gender)
+combined_national$MaritalStatus <- as.factor(combined_national$MaritalStatus)
+combined_national$Veteran <- as.factor(combined_national$Veteran)
+combined_national$Imprisoned <- as.factor(combined_national$Imprisoned)
+
+
+
+
+modelstepL <- stepclass(Category ~ .,data = combined_national, method = "qda")
+modelstepL <- stepclass(Category ~ .,data = combined_national, method = "lda")
+r <- qda(Category ~ NumberInHousehold, data = combined_national, CV = T)
+
+misclass <- combined_national$Category != r$class
+
+rate <- sum(misclass, na.rm = TRUE) / nrow(combined_national)
+
+
+r <- qda(Category ~ Age, data =  combined_national, CV = T)
+
+misclass <-  combined_national$Category != r$class
+
+rate <- sum(misclass, na.rm = TRUE) / nrow(combined_national)
+
+
+#Assumption Checking
+nice_qq(data = combined_national, variable = "NumberInHousehold", 
+        group = "Category")
+
+#Tree
+combined_national <- combined_national %>% rowid_to_column() 
+combined_national <- combined_national %>% filter(Category != "Juvenile")
+n <- nrow(combined_national)
+set.seed(1002)
+train_ids <- sample(1:n, size = round(0.8*n))
+train <- combined_national %>% filter(rowid %in% train_ids)
+
+
+balanced_train <- RandUnderClassif(Category~., combined_national, "balance")
+tree <- rpart(Category ~ Age+ Gender+ Veteran + Imprisoned +
+            NumberInHousehold + AnnualIncome, data = balanced_train)
+plot(as.party(tree), gp=gpar(cex = 1), type = "simple")
+
+```
+
+
+```{r, message=FALSE, warning=FALSE}
+#Analysis of number of eligible posts in a day based on different time interval
+eligible_questions$hours <- substr(eligible_questions$AskedOnUtc, 
+                                   nchar(eligible_questions$AskedOnUtc)-8, 
+                                   nchar(eligible_questions$AskedOnUtc)-6)
+ggplot(data = eligible_questions, aes(x = hours)) +
+  geom_bar(color = "black",
+                 fill = "gray") + 
+  labs(x = "Number of posts in different time intervals in a day")
+
+
+#Analysis on time taken
+questions_taken <- eligible_questions %>% filter(TakenOnUtc != "NULL") %>% mutate(time_taken = difftime(TakenOnUtc, AskedOnUtc, units="days"))
+ggplot(data = questions_taken, aes(x = as.factor(Category), y = log(as.numeric(time_taken)))) +
+  geom_boxplot(color = "black",
+                 fill = "gray") + 
+  labs(x = "Time interval in a day")
+
+anova <- aov(as.numeric(questions_taken$time_taken)~factor(questions_taken$Category))
+summary(anova)
+TukeyHSD(anova)
+
+
+
+
+```
+
+
+```{r, message=FALSE, warning=FALSE}
+#Texas
+questions_TX <- eligible_questions %>% filter(StateAbbr.x == "TX")
+questions_TX$Month <- as.yearmon(substr(questions_TX$AskedOnUtc, 0, nchar(questions_TX$AskedOnUtc)-12))
+sum_data <- questions_TX %>% group_by(Month, Category) %>% summarise(total = n())
+ggplot(sum_data, aes(x = Month, y = total, color = Category)) +
+  geom_line() +
+  labs(title = "Trend of number of questions in each category for Texas")
+
+
+#National
+questions$Month <- as.yearmon(substr(questions$AskedOnUtc, 0, nchar(questions$AskedOnUtc)-12))
+sum_data1 <- questions %>% group_by(Month, Category) %>% summarise(total = n())
+ggplot(sum_data1, aes(x = Month, y = total, color = Category)) +
+  geom_line() +
+  labs(title = "Trend of number of questions in each category for the whole country")
+
+
+
+#CA state
+questions_CA <- questions %>% filter(StateAbbr == "CA")
+sum_data <- questions_CA %>% group_by(Month, Category) %>% summarise(total = n())
+ggplot(sum_data, aes(x = Month, y = total, color = Category)) +
+  geom_line() +
+  labs(title = "Trend of number of questions in each category for California")
+
+#MS state
+questions_MS <- questions %>% filter(StateAbbr == "MS")
+sum_data <- questions_MS %>% group_by(Month, Category) %>% summarise(total = n())
+ggplot(sum_data, aes(x = Month, y = total, color = Category)) +
+  geom_line() +
+  labs(title = "Trend of number of questions in each category for Mississippi")
+```
+
+
+```{r, message=FALSE, warning=FALSE}
+#Proportion of unanswered eligible questions for each category
+sum_data2 <- eligible_questions %>% group_by(Category) %>% summarise(Proption = paste0(round(100 * sum(TakenByAttorneyUno == "NULL")/n(), 2), "%"))
+kable(sum_data2, caption = "Proportions of unanswered eligible questions for each category")
+```
+
+
+
+
+```{r, message=FALSE, warning=FALSE}
+#Questions per attorney ratio
+sum_data_questions <- eligible_questions %>%
+  group_by(StateAbbr.x) %>%
+  summarize(total_questions = n())
+
+sum_data_attorney <- attorneys %>%
+  group_by(StateAbbr) %>%
+  summarize(total_att = n())
+
+merged_summary <- merge(sum_data_attorney, sum_data_questions, by.x = "StateAbbr",by.y = "StateAbbr.x", all = TRUE)
+merged_summary <- merged_summary %>% mutate(Questions_per_attorney = total_questions/total_att)
+kable(merged_summary)
+ggplot(merged_summary, aes(x = StateAbbr)) +
+  geom_bar(aes(y = total_att), stat = "identity", fill = "blue", alpha = 0.5) +
+  geom_bar(aes(y = total_questions), stat = "identity", fill = "red", alpha = 0.5) +
+  labs(title = "Comparison of Two Summaries",
+       y = "Questions to Attorney ratio",
+       x = "State") +
+  theme_minimal()
+
+
+ggplot(merged_summary, aes(y = StateAbbr)) +
+  geom_bar(aes(x = total_att), stat = "identity", fill = "blue", alpha = 0.5) +
+  geom_bar(aes(x = total_questions), stat = "identity", fill = "red", alpha = 0.5) +
+  labs(title = "Comparison of Two Summaries",
+       y = "Questions to Attorney ratio",
+       x = "State") +
+  theme_minimal()
+```
