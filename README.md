@@ -1,6 +1,6 @@
 # -DataFest-ABA-Consultation-Project-using-R
 
-### Goal of This Project**
+### Goal of This Project
 The goal of the project is to provide the American Bar Association (ABA) with data-driven strategies to optimize attorney allocation, focus on growing legal needs, and improve volunteer training to enhance the quality of legal services. By analyzing client inquiry data, the project identifies peak demand times for legal advice, notably 2 pm to 10 pm, and recommends increasing attorney availability during these hours, especially in high-demand states like Texas and Florida. The analysis also highlights the need for more specialized attorneys in family, children, housing, and homelessness law due to increasing client inquiries in these areas. Additionally, the project suggests improving training for volunteers in underrepresented areas of law, such as individual rights and income maintenance, where high rates of unanswered questions persist. Lastly, the project explores the development of predictive models using Linear and Quadratic Discriminant Analysis to categorize client inquiries more accurately, with the aim of enhancing resource management and service quality within the ABA.
 
 ### Actionable Insights for the American Bar Association
